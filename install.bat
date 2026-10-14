@@ -4,7 +4,7 @@ setlocal EnableExtensions
 cd /d "%~dp0"
 
 echo ========================================
-echo   亂打輸入法 0.1.0-Beta 安裝程式
+echo   亂打輸入法 0.1.1-Beta 安裝程式
 echo ========================================
 echo.
 
@@ -16,9 +16,9 @@ if errorlevel 1 (
   exit /b 1
 )
 
-if not exist "ct2_bopomofo_int8\model.bin" (
-  echo [錯誤] 找不到模型資料夾 ct2_bopomofo_int8\
-  echo 請從 GitHub Release 下載 ct2_bopomofo_int8.zip 並解壓到本目錄。
+if not exist "luanda_bopomofo_int8\model.bin" (
+  echo [錯誤] 找不到模型資料夾 luanda_bopomofo_int8\
+  echo 請從 GitHub Release 下載 luanda_bopomofo_int8.zip 並解壓到本目錄。
   pause
   exit /b 1
 )

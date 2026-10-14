@@ -5,13 +5,11 @@ venv/
 .env
 *.log
 
-# 原始大模型／舊量化（勿推上 GitHub；CT2 模型改以 Release 附件提供）
+# 原始大模型／舊量化（勿推上 GitHub；模型改以 Release 附件提供）
 final_bopomofo_model/
 ct2_bopomofo_int8/
 ct2_bopomofo_int8_old/
-
-# CT2 權重改以 Release 附件發布（超過 GitHub 建議單檔大小）
-ct2_bopomofo_int8/model.bin
+luanda_bopomofo_int8/
 
 # 本機快取／打包產物
 *.zip

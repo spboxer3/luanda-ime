@@ -11,7 +11,7 @@ from urllib.parse import urlparse, parse_qs
 import ctranslate2
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-CT2_MODEL_DIR = os.path.join(BASE_DIR, "ct2_bopomofo_int8")
+CT2_MODEL_DIR = os.path.join(BASE_DIR, "luanda_bopomofo_int8")
 POLYPHONE_FILE = os.path.join(BASE_DIR, "polyphone_boost.json")
 PORT = 18989
 CACHE_SIZE = 512

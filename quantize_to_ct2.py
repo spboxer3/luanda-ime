@@ -6,7 +6,7 @@ import ctranslate2
 from transformers import BartForConditionalGeneration
 
 SRC_MODEL_DIR = "./final_bopomofo_model"
-OUT_CT2_DIR = "./ct2_bopomofo_int8"
+OUT_CT2_DIR = "./luanda_bopomofo_int8"
 
 class VocabTokenizerStub:
     """提供 CT2 BartLoader 所需的最小 tokenizer 介面（get_vocab / 特殊 token / id 轉 token）"""

@@ -4,19 +4,23 @@
 schema:
   schema_id: yuce
   name: "亂打輸入法"
-  version: "1.4"
+  version: "1.5"
   author:
     - "Custom Transformer IME"
   description: |
     結合 Transformer 按鍵誤觸糾錯模型的「亂打輸入法」注音輸入法
-    字根補齊（≥2 鍵即預測）；組字區顯示注音；Shift 切英文；Enter 選字
+    字根補齊；大千 Shift 層標點（，。？…）；Shift 切英文；Enter 選字
 
 switches:
   - name: ascii_mode
     reset: 0
     states: [ 中文, 英文 ]
   - name: full_shape
+    reset: 0
     states: [ 半角, 全角 ]
+  - name: ascii_punct
+    reset: 0
+    states: [ 。，, ．， ]
 
 ascii_composer:
   good_old_caps_lock: true
@@ -45,6 +49,7 @@ engine:
     - punct_segmentor
     - fallback_segmentor
   translators:
+    - punct_translator
     - lua_translator@*yuce_translator
   filters:
     - uniquifier
@@ -57,3 +62,80 @@ speller:
   alphabet: "1qaz2wsxedcrfv5tgbyhnujm8ik,9ol.0p;/-6347_ "
   initials: "1qaz2wsxedcrfv5tgbyhnujm8ik,9ol.0p;/-"
   auto_select: false
+
+# 大千注音：逗號／句號等鍵位已被注音佔用，標點走 Shift 層
+# 例：Shift+, → < → ，；Shift+. → > → 。
+punctuator:
+  full_shape:
+    " " : { commit: "　" }
+    "<" : { commit: "，" }
+    ">" : { commit: "。" }
+    "?" : [ ？, ／, ÷ ]
+    ":" : [ ：, ； ]
+    "'" : { pair: [ "‘", "’" ] }
+    "\"" : { pair: [ "“", "”" ] }
+    "\\" : [ 、, ＼ ]
+    "|" : [ ·, ｜, "§", "¦" ]
+    "`" : ｀
+    "~" : ～
+    "!" : { commit: ！ }
+    "@" : [ ＠, ☯ ]
+    "#" : [ ＃, ⌘ ]
+    "%" : [ ％, "°", "℃" ]
+    "$" : [ ￥, "$", "€", "£", "¥", "¢", "¤" ]
+    "^" : { commit: …… }
+    "&" : ＆
+    "*" : [ ＊, ·, ・, ×, ※, ❂ ]
+    "(" : （
+    ")" : ）
+    "_" : [ ——, － ]
+    "+" : ＋
+    "=" : ＝
+    "[" : [ 「, 【, 《, 〔, ［ ]
+    "]" : [ 」, 】, 》, 〕, ］ ]
+    "{" : [ 『, 〖, 〈, ｛ ]
+    "}" : [ 』, 〗, 〉, ｝ ]
+  half_shape:
+    "<" : { commit: "，" }
+    ">" : { commit: "。" }
+    "?" : [ ？, ／, "/", ÷ ]
+    ":" : [ ：, ； ]
+    "'" : { pair: [ "‘", "’" ] }
+    "\"" : { pair: [ "“", "”" ] }
+    "\\" : [ 、, "\\", ＼ ]
+    "|" : [ ·, "|", ｜, "§", "¦" ]
+    "`" : "`"
+    "~" : ～
+    "!" : { commit: ！ }
+    "@" : "@"
+    "#" : "#"
+    "%" : [ "%", ％, "°", "℃" ]
+    "$" : [ ￥, "$", "€", "£", "¥", "¢", "¤" ]
+    "^" : { commit: …… }
+    "&" : "&"
+    "*" : [ "*", ＊, ·, ・, ×, ※, ❂ ]
+    "(" : （
+    ")" : ）
+    "_" : [ ——, －, "-" ]
+    "+" : "+"
+    "=" : "="
+    "[" : [ 「, 【, 《, 〔, ［ ]
+    "]" : [ 」, 】, 》, 〕, ］ ]
+    "{" : [ 『, 〖, 〈, ｛ ]
+    "}" : [ 』, 〗, 〉, ｝ ]
+
+key_binder:
+  import_preset: default
+  bindings:
+    # 組字有候選時，勿把 ㄝ／ㄡ／ㄦ 鍵拿去翻頁
+    - { when: has_menu, accept: comma, send: comma }
+    - { when: has_menu, accept: period, send: period }
+    - { when: has_menu, accept: minus, send: minus }
+    - { when: paging, accept: minus, send: Page_Up }
+    - { when: has_menu, accept: equal, send: Page_Down }
+
+recognizer:
+  patterns:
+    email: "^[a-z][-_.0-9a-z]*@.*$"
+    uppercase: "^[A-Z][-_+.'0-9A-Za-z]*$"
+    url: "^(www[.]|https?:|ftp:|mailto:).*$"
