@@ -4,7 +4,7 @@ setlocal EnableExtensions
 cd /d "%~dp0"
 
 echo ========================================
-echo   亂打輸入法 0.1.1-Beta 安裝程式
+echo   亂打輸入法 0.1.2-Beta 安裝程式
 echo ========================================
 echo.
 

@@ -204,10 +204,24 @@ local function yield_english(input, seg)
     end
 end
 
+local function looks_like_bopomofo_keys(input)
+    -- 只處理大千注音鍵碼，避免標點選單被 AI／佔位符污染
+    return string.match(input, "^[1qaz2wsxedcrfv5tgbyhnujm8ik,9ol%.0p;/%-6347_ ]+$") ~= nil
+end
+
 local function translator(input, seg, env)
     install_clear_hooks(env)
 
+    -- 標點段落：完全不介入（否則會冒出 "..." 佔位候選）
+    if seg:has_tag("punct") then
+        return
+    end
+
     if string.len(input) < 1 then
+        return
+    end
+
+    if not looks_like_bopomofo_keys(input) then
         return
     end
 
@@ -222,12 +236,8 @@ local function translator(input, seg, env)
 
     local preedit = to_zhuyin_preedit(input)
 
-    -- 少於 2 鍵：尚不足以補齊
+    -- 少於 2 鍵：尚不足以補齊（不再輸出 "..." 佔位符）
     if string.len(input) < 2 then
-        local cand = Candidate("yuce_ai", seg.start, seg._end, "...", "")
-        cand.preedit = preedit
-        cand.quality = 1
-        yield(cand)
         return
     end
 
@@ -242,13 +252,9 @@ local function translator(input, seg, env)
         refresh_from_disk(input)
     end
 
+    -- 只有真正的預測結果才進候選欄
     if cache_fits_input(input) then
         yield_list(seg, last_results, preedit)
-    else
-        local cand = Candidate("yuce_ai", seg.start, seg._end, "...", "")
-        cand.preedit = preedit
-        cand.quality = 1
-        yield(cand)
     end
 end
 
