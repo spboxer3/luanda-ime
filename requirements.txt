@@ -1,0 +1,7 @@
+# 終端使用者（亂打輸入法推論服務）
+ctranslate2>=4.0.0
+
+# 若要自行從 final_bopomofo_model 量化，另需：
+# torch>=2.2.0
+# transformers>=4.40.0
+# safetensors>=0.4.3
