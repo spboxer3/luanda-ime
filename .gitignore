@@ -17,3 +17,9 @@ dist/
 build/
 .DS_Store
 Thumbs.db
+
+# Colab 訓練占位腳本（非執行／安裝所需；完整訓練流程另存）
+colab_training/
+
+# 本機實驗殘留
+sleep_ms.vbs
