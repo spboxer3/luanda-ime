@@ -366,10 +366,17 @@ def bootstrap_model() -> None:
 
 
 if __name__ == "__main__":
+    os.makedirs(IPC_DIR, exist_ok=True)
+    # 先佔埠；已有實例則立刻退出，避免第二份寫 loading 把 ready 蓋掉、搶 IPC
+    try:
+        server = ThreadingHTTPServer(("127.0.0.1", PORT), RimeHandler)
+    except OSError:
+        print(f"[luanda] already running on port {PORT}, exit")
+        sys.exit(0)
+
     write_status("loading")
     write_response("", LOADING_TEXT)
     # 先開 IPC，讓小狼毫在載入期間就能收到「模型載入中」
     threading.Thread(target=ipc_poll_loop, name="luanda-ipc", daemon=True).start()
     bootstrap_model()
-    server = ThreadingHTTPServer(("127.0.0.1", PORT), RimeHandler)
     server.serve_forever()

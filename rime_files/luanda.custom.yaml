@@ -1,0 +1,3 @@
+﻿# 亂打補充（主掛鉤已寫進 luanda.schema.yaml）
+patch:
+  menu/page_size: 9

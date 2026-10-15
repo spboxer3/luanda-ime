@@ -1,58 +1,53 @@
--- luanda translator (exact-match + userdict)
--- Only show results whose response_keys exactly equal current input.
+-- Tab 觸發後才向本機 AI 要糾錯候選；平時不 yield（洋蔥負責選字）
 
 local CACHE_DIR = (os.getenv("APPDATA") or ".") .. "\\Rime\\luanda\\ipc"
 local CACHE_FILE = CACHE_DIR .. "\\candidates.txt"
 local KEYS_FILE = CACHE_DIR .. "\\response_keys.txt"
 local REQ_FILE = CACHE_DIR .. "\\request.txt"
+local STATUS_FILE = CACHE_DIR .. "\\status.txt"
+local LOADING_TEXT = "[AI糾錯中]"
 
-local userdict = require("luanda_userdict")
+local PROP_AI = "luanda_ai"
+local PROP_KEYS = "luanda_ai_keys"
 
 local last_results = {}
 local last_result_keys = nil
-local last_req_written = nil
-local last_compose_keys = ""
 local hooks_installed = false
 
-local function clear_memory_cache()
-    last_results = {}
-    last_result_keys = nil
-    last_req_written = nil
+local function clear_ai_props(ctx)
+    ctx:set_property(PROP_AI, "0")
+    ctx:set_property(PROP_KEYS, "")
 end
 
-local function drop_stale_cache(input)
-    if last_result_keys and last_result_keys ~= input then
-        last_results = {}
-        last_result_keys = nil
-    end
-    if last_req_written and last_req_written ~= input then
-        last_req_written = nil
-    end
-end
-
-local function cache_fits_input(input)
-    return last_result_keys == input and last_results and #last_results > 0
-end
-
-local function install_clear_hooks(env)
+local function install_hooks(env)
     if hooks_installed then
         return
     end
     hooks_installed = true
     local ctx = env.engine.context
-    -- 只用 commit/clear；select_notifier 在焦點切換時取候選曾與 rime.dll AV 時間點重合
-    ctx.commit_notifier:connect(function()
-        clear_memory_cache()
-    end)
-    ctx.clear_notifier:connect(function()
-        clear_memory_cache()
-        last_compose_keys = ""
-    end)
-end
-
-local function is_syllable_end(input)
-    local last = string.sub(input, -1)
-    return last == "3" or last == "4" or last == "6" or last == "7" or last == "_"
+    local function reset(c)
+        last_results = {}
+        last_result_keys = nil
+        clear_ai_props(c)
+    end
+    if ctx.commit_notifier then
+        ctx.commit_notifier:connect(reset)
+    end
+    if ctx.clear_notifier then
+        ctx.clear_notifier:connect(reset)
+    end
+    if ctx.update_notifier then
+        ctx.update_notifier:connect(function(c)
+            if c:get_property(PROP_AI) ~= "1" then
+                return
+            end
+            local want = c:get_property(PROP_KEYS) or ""
+            if want ~= "" and c.input ~= want then
+                -- 繼續打字 → 退出 AI 模式，回到洋蔥
+                reset(c)
+            end
+        end)
+    end
 end
 
 local function read_text(path)
@@ -81,7 +76,7 @@ local function read_candidates()
     end
     local results = {}
     for line in string.gmatch(data .. "\n", "(.-)\n") do
-        if line and #line > 0 and line ~= "..." then
+        if line and #line > 0 and line ~= "..." and line ~= LOADING_TEXT and line ~= "[模型載入中]" then
             table.insert(results, line)
         end
     end
@@ -91,6 +86,13 @@ local function read_candidates()
     return results
 end
 
+-- 洋蔥：空白＝一聲、\\＝音節分隔；模型訓練用 '_' 一聲、無分隔符
+local function to_ai_keys(input)
+    local s = string.gsub(input or "", "\\", "")
+    s = string.gsub(s, " ", "_")
+    return s
+end
+
 local function write_request(keys)
     local f = io.open(REQ_FILE, "w")
     if not f then
@@ -98,7 +100,6 @@ local function write_request(keys)
     end
     f:write(keys)
     f:close()
-    last_req_written = keys
     return true
 end
 
@@ -134,188 +135,48 @@ local function wait_for_response(wanted_keys, max_ms)
     return refresh_from_disk(wanted_keys)
 end
 
-
-local SERVER_VBS = (os.getenv("APPDATA") or "") .. "\\Rime\\luanda\\start_server_hidden.vbs"
-local LAUNCH_STAMP = CACHE_DIR .. "\\server_launch_stamp.txt"
-local STATUS_FILE = CACHE_DIR .. "\\status.txt"
-local LOADING_TEXT = "[模型載入中]"
-local LAUNCH_COOLDOWN_SEC = 45
-
-local function launch_stamp_age()
-    local f = io.open(LAUNCH_STAMP, "r")
-    if not f then
-        return 99999
-    end
-    local ts = tonumber(f:read("*l") or "")
-    f:close()
-    if not ts then
-        return 99999
-    end
-    return os.time() - ts
-end
-
-local function ensure_server_running()
-    if SERVER_VBS == "" then
-        return
-    end
-    if launch_stamp_age() < LAUNCH_COOLDOWN_SEC then
-        return
-    end
-    local probe = io.open(SERVER_VBS, "r")
-    if not probe then
-        return
-    end
-    probe:close()
-    local f = io.open(LAUNCH_STAMP, "w")
-    if f then
-        f:write(tostring(os.time()))
-        f:close()
-    end
-    os.execute('cmd /c start "" /b wscript.exe "' .. SERVER_VBS .. '"')
-end
-
-local function results_are_loading(results)
-    return results and #results >= 1 and results[1] == LOADING_TEXT
-end
-
-local function status_is_loading()
-    return read_text(STATUS_FILE) == "loading" and launch_stamp_age() < 90
-end
-
-local ZHUYIN_MAP = {
-    ["1"] = "ㄅ", ["q"] = "ㄆ", ["a"] = "ㄇ", ["z"] = "ㄈ",
-    ["2"] = "ㄉ", ["w"] = "ㄊ", ["s"] = "ㄋ", ["x"] = "ㄌ",
-    ["e"] = "ㄍ", ["d"] = "ㄎ", ["c"] = "ㄏ",
-    ["r"] = "ㄐ", ["f"] = "ㄑ", ["v"] = "ㄒ",
-    ["5"] = "ㄓ", ["t"] = "ㄔ", ["g"] = "ㄕ", ["b"] = "ㄖ",
-    ["y"] = "ㄗ", ["h"] = "ㄘ", ["n"] = "ㄙ",
-    ["u"] = "ㄧ", ["j"] = "ㄨ", ["m"] = "ㄩ",
-    ["8"] = "ㄚ", ["i"] = "ㄛ", ["k"] = "ㄜ", [","] = "ㄝ",
-    ["9"] = "ㄞ", ["o"] = "ㄟ", ["l"] = "ㄠ", ["."] = "ㄡ",
-    ["0"] = "ㄢ", ["p"] = "ㄣ", [";"] = "ㄤ", ["/"] = "ㄥ",
-    ["-"] = "ㄦ",
-    ["_"] = "ˉ", [" "] = "ˉ",
-    ["6"] = "ˊ", ["3"] = "ˇ", ["4"] = "ˋ", ["7"] = "˙",
-}
-
-local function to_zhuyin_preedit(input)
-    local parts = {}
-    for i = 1, #input do
-        local ch = string.sub(input, i, i)
-        parts[#parts + 1] = ZHUYIN_MAP[ch] or ch
-    end
-    return table.concat(parts)
-end
-
-local function yield_english(input, seg)
-    local spaced = string.gsub(input, "_", " ")
-    local raw = input
-    local cand1 = Candidate("luanda_en", seg.start, seg._end, spaced, "")
-    cand1.preedit = spaced
-    cand1.quality = 1000
-    yield(cand1)
-    if raw ~= spaced then
-        local cand2 = Candidate("luanda_en", seg.start, seg._end, raw, "")
-        cand2.preedit = spaced
-        cand2.quality = 999
-        yield(cand2)
-    end
-end
-
-local function looks_like_bopomofo_keys(input)
-    return string.match(input, "^[1qaz2wsxedcrfv5tgbyhnujm8ik,9ol%.0p;/%-6347_ ]+$") ~= nil
-end
-
-local function merge_unique(prefer, rest)
-    local seen = {}
-    local out = {}
-    local function add(list)
-        for _, t in ipairs(list) do
-            if t and t ~= "" and t ~= "..." and t ~= LOADING_TEXT and not seen[t] then
-                seen[t] = true
-                out[#out + 1] = t
-            end
-        end
-    end
-    add(prefer)
-    add(rest)
-    return out
-end
-
-local function yield_merged(seg, texts, preedit)
-    -- yield all; schema page_size=9 + arrow keys for paging
-    for i, text in ipairs(texts) do
-        local cand = Candidate("luanda_ai", seg.start, seg._end, text, "")
-        cand.preedit = preedit
-        cand.quality = 2000 - i
-        yield(cand)
-    end
-end
-
 local function translator(input, seg, env)
-    install_clear_hooks(env)
+    install_hooks(env)
 
+    local ctx = env.engine.context
+    if ctx:get_property(PROP_AI) ~= "1" then
+        return
+    end
+    if (ctx:get_property(PROP_KEYS) or "") ~= input then
+        return
+    end
     if seg:has_tag("punct") then
         return
     end
-    if string.len(input) < 1 or not looks_like_bopomofo_keys(input) then
+    if ctx:get_option("ascii_mode") then
         return
     end
 
-    last_compose_keys = input
-    drop_stale_cache(input)
-
-    if env.engine.context:get_option("ascii_mode") then
-        yield_english(input, seg)
+    local ai_keys = to_ai_keys(input)
+    if #ai_keys < 2 then
         return
     end
 
-    local preedit = to_zhuyin_preedit(input)
-    local habit = userdict.lookup(input)
-
-    if string.len(input) < 2 then
-        if #habit > 0 then
-            yield_merged(seg, habit, preedit)
-        end
-        return
-    end
-
-    if last_req_written ~= input then
-        write_request(input)
-    end
-    if last_result_keys ~= input then
-        -- same as 0.1.3-Beta: short in-process wait (180/320ms), NOT 20s, NOT wscript
-        local wait_ms = is_syllable_end(input) and 200 or 120
-        local ok = wait_for_response(input, wait_ms)
-        if not ok then
-            ensure_server_running()
-            wait_for_response(input, 100)
+    if last_result_keys ~= ai_keys then
+        write_request(ai_keys)
+        -- 使用者主動按 Tab，允許稍長等待；仍不啟動行程
+        local ok = wait_for_response(ai_keys, 600)
+        if not ok and read_text(STATUS_FILE) == "loading" then
+            local cand = Candidate("luanda_ai", seg.start, seg._end, LOADING_TEXT, "AI")
+            cand.quality = 9000
+            yield(cand)
+            return
         end
     else
-        refresh_from_disk(input)
+        refresh_from_disk(ai_keys)
     end
 
-    local ai = {}
-    if cache_fits_input(input) then
-        ai = last_results
-    end
-
-    if results_are_loading(ai) or (status_is_loading() and (not ai or #ai == 0)) then
-        local cand = Candidate("luanda_status", seg.start, seg._end, LOADING_TEXT, "")
-        cand.preedit = preedit
-        cand.quality = 5000
-        yield(cand)
-        if #habit > 0 then
-            yield_merged(seg, habit, preedit)
+    if last_result_keys == ai_keys and last_results then
+        for i, text in ipairs(last_results) do
+            local cand = Candidate("luanda_ai", seg.start, seg._end, text, "AI")
+            cand.quality = 8000 - i
+            yield(cand)
         end
-        return
-    end
-
-    local merged = merge_unique(habit, ai)
-    if #merged > 0 then
-        yield_merged(seg, merged, preedit)
-    elseif #habit > 0 then
-        yield_merged(seg, habit, preedit)
     end
 end
 

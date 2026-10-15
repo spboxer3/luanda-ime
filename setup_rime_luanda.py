@@ -129,15 +129,28 @@ def install_rime_configs():
     if not os.environ.get("APPDATA"):
         raise RuntimeError("找不到 APPDATA 環境變數，請確認在 Windows 環境下執行。")
 
+    onion = os.path.join(RIME_USER_DIR, "bopomo_onionplus.schema.yaml")
+    if not os.path.isfile(onion):
+        raise FileNotFoundError(
+            "找不到洋蔥注音 plus（bopomo_onionplus.schema.yaml）。\n"
+            "亂打 2.0 以洋蔥為底，請先安裝洋蔥後再執行 install.bat。"
+        )
+
     os.makedirs(LUA_DIR, exist_ok=True)
     remove_legacy()
 
-    src_schema = os.path.join(RIME_FILES_DIR, "luanda.schema.yaml")
-    dst_schema = os.path.join(RIME_USER_DIR, "luanda.schema.yaml")
-    shutil.copyfile(src_schema, dst_schema)
-    print(f"[OK] 方案: {dst_schema}")
+    for name in ("luanda.schema.yaml", "luanda.custom.yaml"):
+        src = os.path.join(RIME_FILES_DIR, name)
+        dst = os.path.join(RIME_USER_DIR, name)
+        shutil.copyfile(src, dst)
+        print(f"[OK] 方案: {dst}")
 
-    for name in ("luanda_translator.lua", "luanda_space.lua", "luanda_userdict.lua"):
+    for name in (
+        "luanda_translator.lua",
+        "luanda_tab_ai.lua",
+        "luanda_space.lua",
+        "luanda_userdict.lua",
+    ):
         src_lua = os.path.join(RIME_FILES_DIR, "lua", name)
         dst_lua = os.path.join(LUA_DIR, name)
         if os.path.exists(src_lua):
@@ -145,8 +158,10 @@ def install_rime_configs():
             print(f"[OK] Lua: {dst_lua}")
 
     rime_lua_path = os.path.join(RIME_USER_DIR, "rime.lua")
+    # 使用 lua_processor@*module 時不強制寫入 rime.lua；保留舊 require 以免殘留引用報錯
     entries = [
         'luanda_translator = require("luanda_translator")\n',
+        'luanda_tab_ai = require("luanda_tab_ai")\n',
         'luanda_space = require("luanda_space")\n',
     ]
     if not os.path.exists(rime_lua_path):
