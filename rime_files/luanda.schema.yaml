@@ -2,9 +2,9 @@
 # encoding: utf-8
 
 schema:
-  schema_id: yuce
+  schema_id: luanda
   name: "亂打輸入法"
-  version: "1.6"
+  version: "1.7"
   author:
     - "Custom Transformer IME"
   description: |
@@ -34,7 +34,7 @@ ascii_composer:
 engine:
   processors:
     - ascii_composer
-    - lua_processor@*yuce_space
+    - lua_processor@*luanda_space
     - recognizer
     - key_binder
     - speller
@@ -50,7 +50,7 @@ engine:
     - fallback_segmentor
   translators:
     - punct_translator
-    - lua_translator@*yuce_translator
+    - lua_translator@*luanda_translator
   filters:
     - uniquifier
 

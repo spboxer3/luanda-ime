@@ -16,7 +16,7 @@ POLYPHONE_FILE = os.path.join(BASE_DIR, "polyphone_boost.json")
 PORT = 18989
 CACHE_SIZE = 512
 MAX_CANDIDATES = 9
-IPC_DIR = os.path.join(os.environ.get("TEMP", BASE_DIR), "rime_yuce_cache")
+IPC_DIR = os.path.join(os.environ.get("TEMP", BASE_DIR), "rime_luanda_cache")
 REQ_FILE = os.path.join(IPC_DIR, "request.txt")
 CAND_FILE = os.path.join(IPC_DIR, "candidates.txt")
 KEYS_FILE = os.path.join(IPC_DIR, "response_keys.txt")
@@ -130,14 +130,46 @@ def detokenize_tokens(tokens: list[str]) -> str:
     return "".join(chars)
 
 
+def count_syllables(keys: str) -> int:
+    """依聲調鍵估算音節數（一個音節≈一個字）。"""
+    n = sum(1 for ch in keys if ch in "3467_ ")
+    if keys and keys[-1] not in "3467_ ":
+        n += 1  # 未完成的尾音節
+    return max(1, n)
+
+
 def estimate_max_len(keys: str) -> int:
-    approx_chars = max(1, (len(keys) + 2) // 3)
-    return max(4, min(16, approx_chars + 1))
+    syll = count_syllables(keys)
+    # 略留餘裕，避免長句被截斷；上限避免極端過長
+    return max(syll + 2, min(64, syll + 6))
 
 
 def is_syllable_complete(keys: str) -> bool:
     """字根未完聲調時用較輕 beam，完整音節才上 9 候選。"""
     return bool(keys) and keys[-1] in "3467_ "
+
+
+def rank_by_expected_length(candidates: list[str], expected: int) -> list[str]:
+    """把長度接近音節數的候選排前面，並丟掉過短結果（避免中間字被吃掉）。"""
+    if expected <= 1:
+        return candidates
+
+    def sort_key(text: str):
+        length = len(text)
+        if length == expected:
+            return (0, 0)
+        if length == expected + 1:
+            return (1, 0)
+        if length == expected - 1:
+            return (2, 0)
+        if length < expected - 1:
+            return (4, expected - length)  # 過短最後
+        return (3, length - expected)
+
+    ranked = sorted(candidates, key=sort_key)
+    # 完整句：優先保留長度 >= expected-1；若全被濾掉則退回 ranked
+    kept = [c for c in ranked if len(c) >= max(1, expected - 1)]
+    return kept if kept else ranked
 
 
 def last_zhuyin_syllable(zhuyin: str) -> str:
@@ -161,19 +193,15 @@ def merge_polyphone_boost(clean_keys: str, candidates: list[str]) -> list[str]:
     """模型常漏破音字（如 ㄔㄤˊ→長）；以表補強並放到前面。"""
     zhuyin = keys_to_zhuyin(clean_keys)
     merged: list[str] = []
+    expected = count_syllables(clean_keys)
 
     exact = POLYPHONE_BOOST.get(zhuyin, [])
     if exact:
         merged.extend(exact)
-    else:
-        # 多字輸入：補強「末音節」對應字，並生成末字替換變體
+    elif expected == 1:
+        # 僅單字時做末音節補強，避免多字句被替末字搞亂長度
         syll = last_zhuyin_syllable(zhuyin)
-        tail = POLYPHONE_BOOST.get(syll, [])
-        for b in tail:
-            merged.append(b)
-            for c in candidates:
-                if len(c) >= 1:
-                    merged.append(c[:-1] + b)
+        merged.extend(POLYPHONE_BOOST.get(syll, []))
 
     merged.extend(candidates)
     return list(dict.fromkeys(c for c in merged if c))[:MAX_CANDIDATES]
@@ -186,6 +214,7 @@ def predict(clean_keys: str) -> str:
 
     source_tokens = tokenize_to_tokens(clean_keys)
     max_len = estimate_max_len(clean_keys)
+    expected = count_syllables(clean_keys)
     complete = is_syllable_complete(clean_keys)
     # 字根階段：5 候選較快；完整音節：9 候選
     beam = 9 if complete else 5
@@ -201,13 +230,15 @@ def predict(clean_keys: str) -> str:
             beam_size=beam,
             num_hypotheses=hyps,
             max_decoding_length=max_len,
+            min_decoding_length=max(1, expected) if complete and expected >= 2 else 1,
         )
 
     candidates = [detokenize_tokens(hyp) for hyp in results[0].hypotheses]
+    candidates = [c for c in candidates if c]
     if complete:
         candidates = merge_polyphone_boost(clean_keys, candidates)
-    else:
-        candidates = list(dict.fromkeys(c for c in candidates if c))[:MAX_CANDIDATES]
+        candidates = rank_by_expected_length(candidates, expected)
+    candidates = list(dict.fromkeys(candidates))[:MAX_CANDIDATES]
     result_text = "\n".join(candidates)
     CACHE.put(clean_keys, result_text)
     return result_text
@@ -279,7 +310,7 @@ class RimeHandler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    threading.Thread(target=ipc_poll_loop, name="yuce-ipc", daemon=True).start()
+    threading.Thread(target=ipc_poll_loop, name="luanda-ipc", daemon=True).start()
     write_response("", "...")
     server = ThreadingHTTPServer(("127.0.0.1", PORT), RimeHandler)
     server.serve_forever()

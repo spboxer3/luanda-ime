@@ -1,10 +1,11 @@
 -- 按鍵處理：
 -- 1) 中文組字時空白 → '_'（一聲）
--- 2) Enter → 確認目前候選
--- 3) BackSpace → 刪除「一整個字」（一個音節），而非單一注音鍵
+-- 2) Enter → 記錄慣用詞並確認候選
+-- 3) BackSpace → 刪除一整個音節
 
 local kAccepted = 1
 local kNoop = 2
+local userdict = require("luanda_userdict")
 
 local TONES = {
     ["3"] = true,
@@ -14,7 +15,6 @@ local TONES = {
     ["_"] = true,
 }
 
--- 從末尾刪掉一個音節（完整：含聲調；未完：刪到上一聲調之後）
 local function trim_last_syllable(input)
     if not input or #input == 0 then
         return ""
@@ -29,7 +29,6 @@ local function trim_last_syllable(input)
     end
 
     if last_tone == #input then
-        -- 結尾是完整音節：刪到上一個聲調為止
         local prev = 0
         for i = last_tone - 1, 1, -1 do
             if TONES[string.sub(input, i, i)] then
@@ -39,21 +38,30 @@ local function trim_last_syllable(input)
         end
         return string.sub(input, 1, prev)
     elseif last_tone then
-        -- 未完成音節：只刪掉最後聲調之後的字根
         return string.sub(input, 1, last_tone)
     end
 
-    -- 整段都還沒聲調：一次清掉（視為同一個未完成字）
     return ""
+end
+
+local function record_current_selection(ctx)
+    local input = ctx.input
+    if not input or input == "" then
+        return
+    end
+    local cand = ctx:get_selected_candidate()
+    if cand and cand.text and cand.text ~= "" then
+        userdict.record(input, cand.text)
+    end
 end
 
 local function processor(key, env)
     local ctx = env.engine.context
     local repr = key:repr()
 
-    -- Enter：選中／上屏目前高亮候選
     if repr == "Return" or repr == "KP_Enter" then
         if ctx:is_composing() then
+            record_current_selection(ctx)
             ctx:confirm_current_selection()
             return kAccepted
         end
@@ -67,7 +75,6 @@ local function processor(key, env)
         return kNoop
     end
 
-    -- BackSpace：刪一整個字（音節）
     if repr == "BackSpace" then
         local input = ctx.input
         local trimmed = trim_last_syllable(input)
@@ -81,7 +88,6 @@ local function processor(key, env)
         return kAccepted
     end
 
-    -- 中文模式空白 = 一聲
     if repr == "space" then
         ctx:push_input("_")
         return kAccepted

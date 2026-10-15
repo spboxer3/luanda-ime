@@ -4,22 +4,27 @@ setlocal EnableExtensions
 cd /d "%~dp0"
 
 echo ========================================
-echo   亂打輸入法 解除安裝（方案檔）
+echo   Luanda IME uninstall (schema files)
 echo ========================================
 echo.
-echo 將移除 %%APPDATA%%\Rime 下的 yuce 相關檔案。
-echo 不會移除小狼毫本體或 Python。
+echo Removes luanda / legacy yuce files under %%APPDATA%%\Rime
+echo Does not remove Weasel or Python.
 echo.
 pause
 
 set "RIME=%APPDATA%\Rime"
+if exist "%RIME%\luanda.schema.yaml" del /f /q "%RIME%\luanda.schema.yaml"
 if exist "%RIME%\yuce.schema.yaml" del /f /q "%RIME%\yuce.schema.yaml"
+if exist "%RIME%\lua\luanda_translator.lua" del /f /q "%RIME%\lua\luanda_translator.lua"
+if exist "%RIME%\lua\luanda_space.lua" del /f /q "%RIME%\lua\luanda_space.lua"
+if exist "%RIME%\lua\luanda_userdict.lua" del /f /q "%RIME%\lua\luanda_userdict.lua"
 if exist "%RIME%\lua\yuce_translator.lua" del /f /q "%RIME%\lua\yuce_translator.lua"
 if exist "%RIME%\lua\yuce_space.lua" del /f /q "%RIME%\lua\yuce_space.lua"
+if exist "%RIME%\lua\yuce_userdict.lua" del /f /q "%RIME%\lua\yuce_userdict.lua"
 
 echo.
-echo [提示] default.custom.yaml / rime.lua 請自行檢查是否還留有 yuce 相關行。
-echo [提示] 請手動結束可能仍在執行的 python rime_ai_server.py，並重新部署小狼毫。
+echo [hint] Check default.custom.yaml / rime.lua for leftover lines.
+echo [hint] Stop python rime_ai_server.py and redeploy Weasel.
 echo.
 pause
 endlocal

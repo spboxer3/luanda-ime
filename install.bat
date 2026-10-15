@@ -4,7 +4,7 @@ setlocal EnableExtensions
 cd /d "%~dp0"
 
 echo ========================================
-echo   亂打輸入法 0.1.2-Beta 安裝程式
+echo   亂打輸入法 0.1.3-Beta 安裝程式
 echo ========================================
 echo.
 
@@ -32,7 +32,7 @@ if errorlevel 1 (
 )
 
 echo [2/4] 寫入小狼毫方案「亂打輸入法」...
-python setup_rime_yuce.py
+python setup_rime_luanda.py
 if errorlevel 1 (
   echo [錯誤] 方案安裝失敗。請確認已安裝小狼毫：https://rime.im/download/
   pause
