@@ -15,11 +15,16 @@ CT2_MODEL_DIR = os.path.join(BASE_DIR, "luanda_bopomofo_int8")
 POLYPHONE_FILE = os.path.join(BASE_DIR, "polyphone_boost.json")
 PORT = 18989
 CACHE_SIZE = 512
-MAX_CANDIDATES = 9
-IPC_DIR = os.path.join(os.environ.get("TEMP", BASE_DIR), "rime_luanda_cache")
+# 總候選上限（一次推給 Rime）；畫面上仍每頁 9 個，用 = / - 翻頁
+PAGE_SIZE = 9
+MAX_CANDIDATES = 45  # 分頁用；等待邏輯維持短等
+IPC_DIR = os.path.join(os.environ.get("APPDATA", BASE_DIR), "Rime", "luanda", "ipc")
 REQ_FILE = os.path.join(IPC_DIR, "request.txt")
 CAND_FILE = os.path.join(IPC_DIR, "candidates.txt")
 KEYS_FILE = os.path.join(IPC_DIR, "response_keys.txt")
+STATUS_FILE = os.path.join(IPC_DIR, "status.txt")
+LOADING_TEXT = "[模型載入中]"
+MODEL_READY = threading.Event()
 
 # 大千鍵 → 注音（與 Lua preedit 相同）
 ZHUYIN_MAP = {
@@ -104,11 +109,16 @@ def load_ct2_engine():
 
 
 os.makedirs(IPC_DIR, exist_ok=True)
-TRANSLATOR, VALID_TOKENS = load_ct2_engine()
-POLYPHONE_BOOST = load_polyphone_boost()
 CACHE = LRUCache(CACHE_SIZE)
 INFER_LOCK = threading.Lock()
-print(f"破音字補強條目: {len(POLYPHONE_BOOST)}")
+# 模型稍後在 main 載入；載入前 IPC 可先回「載入中」
+TRANSLATOR = None
+VALID_TOKENS = set()
+POLYPHONE_BOOST = {}
+
+
+def write_status(status: str) -> None:
+    atomic_write(STATUS_FILE, status)
 
 
 def tokenize_to_tokens(text: str) -> list[str]:
@@ -208,6 +218,9 @@ def merge_polyphone_boost(clean_keys: str, candidates: list[str]) -> list[str]:
 
 
 def predict(clean_keys: str) -> str:
+    if not MODEL_READY.is_set() or TRANSLATOR is None:
+        return LOADING_TEXT
+
     cached = CACHE.get(clean_keys)
     if cached is not None:
         return cached
@@ -216,9 +229,9 @@ def predict(clean_keys: str) -> str:
     max_len = estimate_max_len(clean_keys)
     expected = count_syllables(clean_keys)
     complete = is_syllable_complete(clean_keys)
-    # 字根階段：5 候選較快；完整音節：9 候選
-    beam = 9 if complete else 5
-    hyps = 9 if complete else 5
+    # 字根階段少算以求快；完整音節拉高 beam，供多頁翻閱
+    beam = MAX_CANDIDATES if complete else PAGE_SIZE
+    hyps = MAX_CANDIDATES if complete else PAGE_SIZE
 
     with INFER_LOCK:
         cached = CACHE.get(clean_keys)
@@ -245,10 +258,33 @@ def predict(clean_keys: str) -> str:
 
 
 def atomic_write(path: str, text: str) -> None:
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8", newline="\n") as f:
-        f.write(text)
-    os.replace(tmp, path)
+    """Robust write: unique tmp + retries (Weasel may briefly lock IPC files)."""
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    tmp = f"{path}.{os.getpid()}.{time.time_ns()}.tmp"
+    last_err: Exception | None = None
+    for _ in range(8):
+        try:
+            with open(tmp, "w", encoding="utf-8", newline="\n") as f:
+                f.write(text)
+            os.replace(tmp, path)
+            return
+        except OSError as exc:
+            last_err = exc
+            try:
+                if os.path.exists(tmp):
+                    os.remove(tmp)
+            except OSError:
+                pass
+            time.sleep(0.05)
+    # Last resort: direct overwrite (non-atomic)
+    try:
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(text)
+        return
+    except OSError:
+        if last_err:
+            raise last_err
+        raise
 
 
 def write_response(raw_keys: str, candidates: str) -> None:
@@ -309,8 +345,31 @@ class RimeHandler(BaseHTTPRequestHandler):
             self.wfile.write(body)
 
 
+def bootstrap_model() -> None:
+    global TRANSLATOR, VALID_TOKENS, POLYPHONE_BOOST
+    write_status("loading")
+    write_response("", LOADING_TEXT)
+    TRANSLATOR, VALID_TOKENS = load_ct2_engine()
+    POLYPHONE_BOOST = load_polyphone_boost()
+    print(f"破音字補強條目: {len(POLYPHONE_BOOST)}")
+    MODEL_READY.set()
+    write_status("ready")
+    # 載入完成後立刻處理目前組字請求，方便候選從「載入中」換成真結果
+    try:
+        if os.path.exists(REQ_FILE):
+            with open(REQ_FILE, "r", encoding="utf-8") as f:
+                raw = f.read().strip()
+            if raw and len(raw) >= 2:
+                write_response(raw, predict(raw.replace("_", " ")))
+    except Exception as exc:
+        print(f"[IPC] flush after load: {exc}")
+
+
 if __name__ == "__main__":
+    write_status("loading")
+    write_response("", LOADING_TEXT)
+    # 先開 IPC，讓小狼毫在載入期間就能收到「模型載入中」
     threading.Thread(target=ipc_poll_loop, name="luanda-ipc", daemon=True).start()
-    write_response("", "...")
+    bootstrap_model()
     server = ThreadingHTTPServer(("127.0.0.1", PORT), RimeHandler)
     server.serve_forever()

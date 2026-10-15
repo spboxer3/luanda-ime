@@ -35,7 +35,7 @@ function M.record(keys, text)
     if not keys or keys == "" or not text or text == "" then
         return
     end
-    if text == "..." then
+    if text == "..." or text == "[模型載入中]" then
         return
     end
     -- 略過純英文／純 ASCII 候選
@@ -92,7 +92,7 @@ function M.lookup(keys)
     end)
 
     local out = {}
-    for i = 1, math.min(9, #arr) do
+    for i = 1, math.min(45, #arr) do
         out[#out + 1] = arr[i].text
     end
     cache_keys = keys

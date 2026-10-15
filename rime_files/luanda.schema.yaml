@@ -4,7 +4,7 @@
 schema:
   schema_id: luanda
   name: "亂打輸入法"
-  version: "1.7"
+  version: "1.10"
   author:
     - "Custom Transformer IME"
   description: |
@@ -131,8 +131,15 @@ key_binder:
     - { when: has_menu, accept: comma, send: comma }
     - { when: has_menu, accept: period, send: period }
     - { when: has_menu, accept: minus, send: minus }
-    - { when: paging, accept: minus, send: Page_Up }
-    - { when: has_menu, accept: equal, send: Page_Down }
+    # 取消 = / - 翻頁（避免與注音 ㄦ、以及 Shift 層 = 衝突）
+    - { when: has_menu, accept: equal, send: equal }
+    - { when: paging, accept: minus, send: minus }
+    - { when: paging, accept: equal, send: equal }
+    # →← 翻頁走內建 navigator（勿用 Lua menu:prepare/highlight，易在焦點切換時弄崩 rime.dll）
+    - { when: has_menu, accept: Right, send: Page_Down }
+    - { when: has_menu, accept: Left, send: Page_Up }
+    - { when: paging, accept: Right, send: Page_Down }
+    - { when: paging, accept: Left, send: Page_Up }
 
 recognizer:
   patterns:

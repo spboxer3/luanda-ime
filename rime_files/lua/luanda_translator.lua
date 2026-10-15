@@ -1,7 +1,7 @@
 -- luanda translator (exact-match + userdict)
 -- Only show results whose response_keys exactly equal current input.
 
-local CACHE_DIR = (os.getenv("TEMP") or ".") .. "\\rime_luanda_cache"
+local CACHE_DIR = (os.getenv("APPDATA") or ".") .. "\\Rime\\luanda\\ipc"
 local CACHE_FILE = CACHE_DIR .. "\\candidates.txt"
 local KEYS_FILE = CACHE_DIR .. "\\response_keys.txt"
 local REQ_FILE = CACHE_DIR .. "\\request.txt"
@@ -40,6 +40,7 @@ local function install_clear_hooks(env)
     end
     hooks_installed = true
     local ctx = env.engine.context
+    -- 只用 commit/clear；select_notifier 在焦點切換時取候選曾與 rime.dll AV 時間點重合
     ctx.commit_notifier:connect(function()
         clear_memory_cache()
     end)
@@ -47,14 +48,6 @@ local function install_clear_hooks(env)
         clear_memory_cache()
         last_compose_keys = ""
     end)
-    if ctx.select_notifier then
-        ctx.select_notifier:connect(function(c)
-            local cand = c:get_selected_candidate()
-            if cand and last_compose_keys ~= "" and cand.text then
-                userdict.record(last_compose_keys, cand.text)
-            end
-        end)
-    end
 end
 
 local function is_syllable_end(input)
@@ -141,6 +134,54 @@ local function wait_for_response(wanted_keys, max_ms)
     return refresh_from_disk(wanted_keys)
 end
 
+
+local SERVER_VBS = (os.getenv("APPDATA") or "") .. "\\Rime\\luanda\\start_server_hidden.vbs"
+local LAUNCH_STAMP = CACHE_DIR .. "\\server_launch_stamp.txt"
+local STATUS_FILE = CACHE_DIR .. "\\status.txt"
+local LOADING_TEXT = "[模型載入中]"
+local LAUNCH_COOLDOWN_SEC = 45
+
+local function launch_stamp_age()
+    local f = io.open(LAUNCH_STAMP, "r")
+    if not f then
+        return 99999
+    end
+    local ts = tonumber(f:read("*l") or "")
+    f:close()
+    if not ts then
+        return 99999
+    end
+    return os.time() - ts
+end
+
+local function ensure_server_running()
+    if SERVER_VBS == "" then
+        return
+    end
+    if launch_stamp_age() < LAUNCH_COOLDOWN_SEC then
+        return
+    end
+    local probe = io.open(SERVER_VBS, "r")
+    if not probe then
+        return
+    end
+    probe:close()
+    local f = io.open(LAUNCH_STAMP, "w")
+    if f then
+        f:write(tostring(os.time()))
+        f:close()
+    end
+    os.execute('cmd /c start "" /b wscript.exe "' .. SERVER_VBS .. '"')
+end
+
+local function results_are_loading(results)
+    return results and #results >= 1 and results[1] == LOADING_TEXT
+end
+
+local function status_is_loading()
+    return read_text(STATUS_FILE) == "loading" and launch_stamp_age() < 90
+end
+
 local ZHUYIN_MAP = {
     ["1"] = "ㄅ", ["q"] = "ㄆ", ["a"] = "ㄇ", ["z"] = "ㄈ",
     ["2"] = "ㄉ", ["w"] = "ㄊ", ["s"] = "ㄋ", ["x"] = "ㄌ",
@@ -190,7 +231,7 @@ local function merge_unique(prefer, rest)
     local out = {}
     local function add(list)
         for _, t in ipairs(list) do
-            if t and t ~= "" and t ~= "..." and not seen[t] then
+            if t and t ~= "" and t ~= "..." and t ~= LOADING_TEXT and not seen[t] then
                 seen[t] = true
                 out[#out + 1] = t
             end
@@ -202,10 +243,8 @@ local function merge_unique(prefer, rest)
 end
 
 local function yield_merged(seg, texts, preedit)
+    -- yield all; schema page_size=9 + arrow keys for paging
     for i, text in ipairs(texts) do
-        if i > 9 then
-            break
-        end
         local cand = Candidate("luanda_ai", seg.start, seg._end, text, "")
         cand.preedit = preedit
         cand.quality = 2000 - i
@@ -245,8 +284,13 @@ local function translator(input, seg, env)
         write_request(input)
     end
     if last_result_keys ~= input then
-        local wait_ms = is_syllable_end(input) and 320 or 180
-        wait_for_response(input, wait_ms)
+        -- same as 0.1.3-Beta: short in-process wait (180/320ms), NOT 20s, NOT wscript
+        local wait_ms = is_syllable_end(input) and 200 or 120
+        local ok = wait_for_response(input, wait_ms)
+        if not ok then
+            ensure_server_running()
+            wait_for_response(input, 100)
+        end
     else
         refresh_from_disk(input)
     end
@@ -256,9 +300,22 @@ local function translator(input, seg, env)
         ai = last_results
     end
 
+    if results_are_loading(ai) or (status_is_loading() and (not ai or #ai == 0)) then
+        local cand = Candidate("luanda_status", seg.start, seg._end, LOADING_TEXT, "")
+        cand.preedit = preedit
+        cand.quality = 5000
+        yield(cand)
+        if #habit > 0 then
+            yield_merged(seg, habit, preedit)
+        end
+        return
+    end
+
     local merged = merge_unique(habit, ai)
     if #merged > 0 then
         yield_merged(seg, merged, preedit)
+    elseif #habit > 0 then
+        yield_merged(seg, habit, preedit)
     end
 end
 
